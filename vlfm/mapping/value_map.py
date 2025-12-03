@@ -354,6 +354,54 @@ class ValueMap(BaseMap):
 
         return adjusted_mask
 
+    def _debug_print_ray_values(self, new_map: np.ndarray, values: np.ndarray, label: str) -> None:
+        """Debug helper to print values along a ray in the FOV"""
+        # Find center of the map
+        center_row = new_map.shape[0] // 2
+        center_col = new_map.shape[1] // 2
+
+        # Choose a ray angle (20 degrees from center)
+        angle_deg = 20
+        angle_rad = np.deg2rad(angle_deg)
+
+        # Sample points along this ray at different distances
+        distances = [50, 100, 150, 200, 250]  # pixels
+
+        print(f"\n{'='*80}")
+        print(f"DEBUG RAY VALUES - {label} (Ray at {angle_deg}° from center)")
+        print(f"New value (scalar broadcast): {values[0]:.4f}")
+        print(f"{'='*80}")
+        print(f"{'Dist':>6s} | {'Row':>6s} {'Col':>6s} | {'c_new':>8s} {'c_old':>8s} | {'v_old':>8s} {'v_final':>8s} | {'Status':>15s}")
+        print(f"{'-'*80}")
+
+        for dist in distances:
+            # Calculate pixel position along the ray
+            row = int(center_row + dist * np.cos(angle_rad))
+            col = int(center_col + dist * np.sin(angle_rad))
+
+            # Check bounds
+            if row < 0 or row >= new_map.shape[0] or col < 0 or col >= new_map.shape[1]:
+                continue
+
+            c_new = new_map[row, col]
+            c_old = self._map[row, col]
+            v_old = self._value_map[row, col, 0] if self._value_channels > 0 else 0
+            v_final = self._value_map[row, col, 0] if self._value_channels > 0 else 0
+
+            # Determine status
+            if c_new == 0:
+                status = "Outside FOV"
+            elif c_old == 0:
+                status = "First time"
+            elif label == "BEFORE_FUSION":
+                status = "To be fused"
+            else:
+                status = "Fused"
+
+            print(f"{dist:6d} | {row:6d} {col:6d} | {c_new:8.4f} {c_old:8.4f} | {v_old:8.4f} {v_final:8.4f} | {status:>15s}")
+
+        print(f"{'='*80}\n")
+
     def _fuse_new_data(self, new_map: np.ndarray, values: np.ndarray) -> None:
         """Fuse the new data with the existing value and confidence maps.
 
@@ -398,6 +446,10 @@ class ValueMap(BaseMap):
         new_map_mask = np.logical_and(new_map < self._decision_threshold, new_map < self._map)
         new_map[new_map_mask] = 0
 
+        # Debug: Print values along a ray
+        if os.environ.get("DEBUG_RAY_VALUES", "0") == "1":
+            self._debug_print_ray_values(new_map, values, "BEFORE_FUSION")
+
         if self._use_max_confidence:
             # For every pixel that has a higher new_map in the new map than the
             # existing value map, replace the value in the existing value map with
@@ -427,6 +479,10 @@ class ValueMap(BaseMap):
             # value or confidence maps will be replaced with 0
             self._value_map = np.nan_to_num(self._value_map)
             self._map = np.nan_to_num(self._map)
+
+        # Debug: Print values along a ray after fusion
+        if os.environ.get("DEBUG_RAY_VALUES", "0") == "1":
+            self._debug_print_ray_values(new_map, values, "AFTER_FUSION")
 
 
 def remap(value: float, from_low: float, from_high: float, to_low: float, to_high: float) -> float:
